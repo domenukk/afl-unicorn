@@ -1,1 +1,1 @@
-docs/QuickStartGuide.txt
+unsupported reparse point
