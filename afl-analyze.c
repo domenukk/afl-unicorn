@@ -26,6 +26,8 @@
 #include "debug.h"
 #include "alloc-inl.h"
 #include "hash.h"
+#include "sharedmem.h"
+#include "afl-common.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -47,7 +49,7 @@
 
 static s32 child_pid;                 /* PID of the tested program         */
 
-static u8* trace_bits;                /* SHM with instrumentation bitmap   */
+       u8* trace_bits;                /* SHM with instrumentation bitmap   */
 
 static u8 *in_file,                   /* Analyzer input test case          */
           *prog_in,                   /* Targeted program input file       */
@@ -64,8 +66,7 @@ static u32 in_len,                    /* Input data length                 */
 
 static u64 mem_limit = MEM_LIMIT;     /* Memory limit (MB)                 */
 
-static s32 shm_id,                    /* ID of the SHM region              */
-           dev_null_fd = -1;          /* FD to /dev/null                   */
+static s32 dev_null_fd = -1;          /* FD to /dev/null                   */
 
 static u8  edges_only,                /* Ignore hit counts?                */
            use_hex_offsets,           /* Show hex offsets?                 */
@@ -141,37 +142,11 @@ static inline u8 anything_set(void) {
 }
 
 
-/* Get rid of shared memory and temp files (atexit handler). */
+/* Get rid of temp files (atexit handler). */
 
-static void remove_shm(void) {
+static void at_exit_handler(void) {
 
   unlink(prog_in); /* Ignore errors */
-  shmctl(shm_id, IPC_RMID, NULL);
-
-}
-
-
-/* Configure shared memory. */
-
-static void setup_shm(void) {
-
-  u8* shm_str;
-
-  shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);
-
-  if (shm_id < 0) PFATAL("shmget() failed");
-
-  atexit(remove_shm);
-
-  shm_str = alloc_printf("%d", shm_id);
-
-  setenv(SHM_ENV_VAR, shm_str, 1);
-
-  ck_free(shm_str);
-
-  trace_bits = shmat(shm_id, NULL, 0);
-  
-  if (!trace_bits) PFATAL("shmat() failed");
 
 }
 
@@ -750,48 +725,6 @@ static void setup_signal_handlers(void) {
 }
 
 
-/* Detect @@ in args. */
-
-static void detect_file_args(char** argv) {
-
-  u32 i = 0;
-  u8* cwd = getcwd(NULL, 0);
-
-  if (!cwd) PFATAL("getcwd() failed");
-
-  while (argv[i]) {
-
-    u8* aa_loc = strstr(argv[i], "@@");
-
-    if (aa_loc) {
-
-      u8 *aa_subst, *n_arg;
-
-      /* Be sure that we're always using fully-qualified paths. */
-
-      if (prog_in[0] == '/') aa_subst = prog_in;
-      else aa_subst = alloc_printf("%s/%s", cwd, prog_in);
-
-      /* Construct a replacement argv value. */
-
-      *aa_loc = 0;
-      n_arg = alloc_printf("%s%s%s", argv[i], aa_subst, aa_loc + 2);
-      argv[i] = n_arg;
-      *aa_loc = '@';
-
-      if (prog_in[0] != '/') ck_free(aa_subst);
-
-    }
-
-    i++;
-
-  }
-
-  free(cwd); /* not tracked */
-
-}
-
-
 /* Display usage hints. */
 
 static void usage(u8* argv0) {
@@ -883,10 +816,6 @@ static char** get_qemu_argv(u8* own_loc, char** argv, int argc) {
   char** new_argv = ck_alloc(sizeof(char*) * (argc + 4));
   u8 *tmp, *cp, *rsl, *own_copy;
 
-  /* Workaround for a QEMU stability glitch. */
-
-  setenv("QEMU_LOG", "nochain", 1);
-
   memcpy(new_argv + 3, argv + 1, sizeof(char*) * argc);
 
   /* Now we need to actually find qemu for argv[0]. */
@@ -948,7 +877,7 @@ int main(int argc, char** argv) {
 
   doc_path = access(DOC_PATH, F_OK) ? "docs" : DOC_PATH;
 
-  SAYF(cCYA "afl-analyze " cBRI VERSION cRST " by <lcamtuf@google.com>\n");
+  SAYF(cCYA "afl-analyze" VERSION cRST " by <lcamtuf@google.com>\n");
 
   while ((opt = getopt(argc,argv,"+i:f:m:t:eQU")) > 0)
 
@@ -1048,13 +977,14 @@ int main(int argc, char** argv) {
 
   use_hex_offsets = !!getenv("AFL_ANALYZE_HEX");
 
-  setup_shm();
+  setup_shm(0);
+  atexit(at_exit_handler);
   setup_signal_handlers();
 
   set_up_environment();
 
   find_binary(argv[optind]);
-  detect_file_args(argv + optind);
+  detect_file_args(argv + optind, prog_in);
 
   if (qemu_mode)
     use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);

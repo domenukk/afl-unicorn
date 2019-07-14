@@ -64,6 +64,14 @@ that can offer huge benefits for programs with high startup overhead. Both
 modes require you to edit the source code of the fuzzed program, but the
 changes often amount to just strategically placing a single line or two.
 
+If there are important data comparisons performed (e.g. strcmp(ptr, MAGIC_HDR)
+then using laf-intel (see llvm_mode/README.laf-intel) will help afl-fuzz a lot
+to get to the important parts in the code.
+
+If you are only intested in specific parts of the code being fuzzed, you can
+whitelist the files that are actually relevant. This improves the speed and
+accuracy of afl. See llvm_mode/README.whitelist
+
 4) Profile and optimize the binary
 ----------------------------------
 
@@ -187,6 +195,17 @@ There are several OS-level factors that may affect fuzzing speed:
     Setting a different scheduling policy for the fuzzer process - say
     SCHED_RR - can usually speed things up, too, but needs to be done with
     care.
+
+  - Use the afl-system-config script to set all proc/sys settings above
+
+  - Disable all the spectre, meltdown etc. security countermeasures in the
+    kernel if your machine is properly separated:
+    "ibpb=off ibrs=off kpti=off l1tf=off mds=off mitigations=off
+     no_stf_barrier noibpb noibrs nopcid nopti nospec_store_bypass_disable
+     nospectre_v1 nospectre_v2 pcid=off pti=off spec_store_bypass_disable=off
+     spectre_v2=off stf_barrier=off"
+    In most Linux distributions you can put this into a /etc/default/grub
+    variable.
 
 9) If all other options fail, use -d
 ------------------------------------

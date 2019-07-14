@@ -12,9 +12,57 @@ Staying informed
 Want to stay in the loop on major new features? Join our mailing list by
 sending a mail to <afl-users+subscribe@googlegroups.com>.
 
-Not sure if you should upgrade? The lowest currently recommended version
-is 2.41b. If you're stuck on an earlier release, it's strongly advisable
-to get on with the times.
+
+-----------------------------
+Version ++2.52d (tbd):
+-----------------------------
+
+  - added instrim a much better llvm_mode instrumentation
+    (https://github.com/csienslab/instrim)
+  - added MOpt (github.com/puppet-meteor/MOpt-AFL) mode
+  - added code to make it more portable to other platforms than Intel Linux
+  - added never zero counters for afl-gcc and optional (because of an
+    optimization issue in llvm < 9) for llvm_mode (AFL_LLVM_NEVER_ZERO=1)
+  - added a new doc about binary only fuzzing: docs/binaryonly_fuzzing.txt
+  - more cpu power for afl-system-config
+  - added forkserver patch to afl-tmin, makes it much faster (originally from
+    github.com/nccgroup/TriforceAFL)
+  - added whitelist support for llvm_mode via AFL_LLVM_WHITELIST to allow
+    only to instrument what is actually interesting. Gives more speed and less
+    map pollution (originally by choller@mozilla)
+  - added Python Module mutator support, python2.7-dev is autodetected.
+    see docs/python_mutators.txt (originally by choller@mozilla)
+  - added AFL_CAL_FAST for slow applications and AFL_DEBUG_CHILD_OUTPUT for
+    debugging
+  - added -V time and -E execs option to better comparison runs, runs afl-fuzz
+    for a specific time/executions.
+  - added a  -s seed  switch to allow afl run with a fixed initial
+    seed that is not updated. this is good for performance and path discovery
+    tests as the random numbers are deterministic then
+  - llvm_mode LAF_... env variables can now be specified as AFL_LLVM_LAF_...
+    that is longer but in line with other llvm specific env vars
+  - ... your idea or patch?
+
+
+
+-----------------------------
+Version ++2.52c (2019-06-05):
+-----------------------------
+
+  - Applied community patches. See docs/PATCHES for the full list.
+    LLVM and Qemu modes are now faster.
+    Important changes:
+      afl-fuzz: -e EXTENSION  commandline option
+      llvm_mode: LAF-intel performance (needs activation, see llvm/README.laf-intel)
+      a few new environment variables for afl-fuzz, llvm and qemu, see docs/env_variables.txt
+  - Added the power schedules of AFLfast by Marcel Boehme, but set the default
+    to the AFL schedule, not to the FAST schedule. So nothing changes unless
+    you use the new -p option :-) - see docs/power_schedules.txt
+  - added afl-system-config script to set all system performance options for fuzzing
+  - llvm_mode works with llvm 3.9 up to including 8 !
+  - qemu_mode got upgraded from 2.1 to 3.1 - incorporated from 
+    https://github.com/andreafioraldi/afl and with community patches added
+
 
 ---------------------------
 Version 2.52b (2017-11-04):

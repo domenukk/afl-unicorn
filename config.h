@@ -1,5 +1,5 @@
 /*
-   american fuzzy lop - vaguely configurable bits
+   american fuzzy lop plus plus - vaguely configurable bits
    ----------------------------------------------
 
    Written and maintained by Michal Zalewski <lcamtuf@google.com>
@@ -21,7 +21,7 @@
 
 /* Version string: */
 
-#define VERSION             "2.52b"
+#define VERSION             "++2.52d"
 
 /******************************************************
  *                                                    *
@@ -87,10 +87,15 @@
    of 32-bit int overflows): */
 
 #define HAVOC_MAX_MULT      16
+#define HAVOC_MAX_MULT_MOPT 32
 
 /* Absolute minimum number of havoc cycles (after all adjustments): */
 
 #define HAVOC_MIN           16
+
+/* Power Schedule Divisor */
+#define POWER_BETA          1
+#define MAX_FACTOR          (POWER_BETA * 32)
 
 /* Maximum stacking for havoc-stage tweaks. The actual value is calculated
    like this: 

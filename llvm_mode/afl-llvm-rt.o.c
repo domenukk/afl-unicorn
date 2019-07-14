@@ -44,6 +44,9 @@
 #  define CONST_PRIO 0
 #endif /* ^USE_TRACE_PC */
 
+#include <sys/mman.h>
+#include <fcntl.h>
+
 
 /* Globals needed by the injected instrumentation. The __afl_area_initial region
    is used for instrumentation output before __afl_map_shm() has a chance to run.
@@ -71,10 +74,34 @@ static void __afl_map_shm(void) {
      hacky .init code to work correctly in projects such as OpenSSL. */
 
   if (id_str) {
+#ifdef USEMMAP
+    const char *shm_file_path = id_str;
+    int shm_fd = -1;
+    unsigned char *shm_base = NULL;
 
+    /* create the shared memory segment as if it was a file */
+    shm_fd = shm_open(shm_file_path, O_RDWR, 0600);
+    if (shm_fd == -1) {
+      printf("shm_open() failed\n");
+      exit(1);
+    }
+
+    /* map the shared memory segment to the address space of the process */
+    shm_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (shm_base == MAP_FAILED) {
+      close(shm_fd);
+      shm_fd = -1;
+
+      printf("mmap() failed\n");
+      exit(2);
+    }
+
+    __afl_area_ptr = shm_base;
+#else
     u32 shm_id = atoi(id_str);
 
     __afl_area_ptr = shmat(shm_id, NULL, 0);
+#endif
 
     /* Whooooops. */
 
@@ -98,6 +125,8 @@ static void __afl_start_forkserver(void) {
   s32 child_pid;
 
   u8  child_stopped = 0;
+  
+  void (*old_sigchld_handler)(int) = signal(SIGCHLD, SIG_DFL);
 
   /* Phone home and tell the parent that we're OK. If parent isn't there,
      assume we're not running in forkserver mode and just execute program. */
@@ -132,6 +161,7 @@ static void __afl_start_forkserver(void) {
       /* In child process: close fds, resume execution. */
 
       if (!child_pid) {
+        signal(SIGCHLD, old_sigchld_handler);
 
         close(FORKSRV_FD);
         close(FORKSRV_FD + 1);

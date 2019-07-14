@@ -26,6 +26,8 @@
 #include "debug.h"
 #include "alloc-inl.h"
 #include "hash.h"
+#include "sharedmem.h"
+#include "afl-common.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -44,16 +46,22 @@
 #include <sys/types.h>
 #include <sys/resource.h>
 
-static s32 child_pid;                 /* PID of the tested program         */
+static s32 forksrv_pid,               /* PID of the fork server           */
+           child_pid;                 /* PID of the tested program        */
 
-static u8 *trace_bits,                /* SHM with instrumentation bitmap   */
-          *mask_bitmap;               /* Mask for trace bits (-B)          */
+static s32 fsrv_ctl_fd,               /* Fork server control pipe (write) */
+           fsrv_st_fd;                /* Fork server status pipe (read)   */
+
+       u8 *trace_bits;                /* SHM with instrumentation bitmap   */
+static u8 *mask_bitmap;               /* Mask for trace bits (-B)          */
 
 static u8 *in_file,                   /* Minimizer input test case         */
           *out_file,                  /* Minimizer output file             */
           *prog_in,                   /* Targeted program input file       */
           *target_path,               /* Path to target binary             */
           *doc_path;                  /* Path to docs                      */
+
+static s32 prog_in_fd;                /* Persistent fd for prog_in         */
 
 static u8* in_data;                   /* Input data for trimming           */
 
@@ -67,8 +75,7 @@ static u32 in_len,                    /* Input data length                 */
 
 static u64 mem_limit = MEM_LIMIT;     /* Memory limit (MB)                 */
 
-static s32 shm_id,                    /* ID of the SHM region              */
-           dev_null_fd = -1;          /* FD to /dev/null                   */
+static s32 dev_null_fd = -1;          /* FD to /dev/null                   */
 
 static u8  crash_mode,                /* Crash-centric mode?               */
            exit_crash,                /* Treat non-zero exit as crash?     */
@@ -153,41 +160,11 @@ static inline u8 anything_set(void) {
 }
 
 
+/* Get rid of temp files (atexit handler). */
 
-/* Get rid of shared memory and temp files (atexit handler). */
-
-static void remove_shm(void) {
-
+static void at_exit_handler(void) {
   if (prog_in) unlink(prog_in); /* Ignore errors */
-  shmctl(shm_id, IPC_RMID, NULL);
-
 }
-
-
-/* Configure shared memory. */
-
-static void setup_shm(void) {
-
-  u8* shm_str;
-
-  shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);
-
-  if (shm_id < 0) PFATAL("shmget() failed");
-
-  atexit(remove_shm);
-
-  shm_str = alloc_printf("%d", shm_id);
-
-  setenv(SHM_ENV_VAR, shm_str, 1);
-
-  ck_free(shm_str);
-
-  trace_bits = shmat(shm_id, NULL, 0);
-  
-  if (!trace_bits) PFATAL("shmat() failed");
-
-}
-
 
 /* Read initial file. */
 
@@ -236,38 +213,70 @@ static s32 write_to_file(u8* path, u8* mem, u32 len) {
 
 }
 
+/* Write modified data to file for testing. If use_stdin is clear, the old file
+   is unlinked and a new one is created. Otherwise, prog_in_fd is rewound and
+   truncated. */
+
+static void write_to_testcase(void* mem, u32 len) {
+
+  s32 fd = prog_in_fd;
+
+  if (!use_stdin) {
+
+    unlink(prog_in); /* Ignore errors. */
+
+    fd = open(prog_in, O_WRONLY | O_CREAT | O_EXCL, 0600);
+
+    if (fd < 0) PFATAL("Unable to create '%s'", prog_in);
+
+  } else lseek(fd, 0, SEEK_SET);
+
+  ck_write(fd, mem, len, prog_in);
+
+  if (use_stdin) {
+
+    if (ftruncate(fd, len)) PFATAL("ftruncate() failed");
+    lseek(fd, 0, SEEK_SET);
+
+  } else close(fd);
+
+}
+
+
 
 /* Handle timeout signal. */
 
 static void handle_timeout(int sig) {
 
+  if (child_pid > 0) {
+
   child_timed_out = 1;
-  if (child_pid > 0) kill(child_pid, SIGKILL);
+    kill(child_pid, SIGKILL);
+
+  } else if (child_pid == -1 && forksrv_pid > 0) {
+
+    child_timed_out = 1;
+    kill(forksrv_pid, SIGKILL);
+
+  }
 
 }
 
-
-/* Execute target application. Returns 0 if the changes are a dud, or
-   1 if they should be kept. */
-
-static u8 run_target(char** argv, u8* mem, u32 len, u8 first_run) {
-
+/* start the app and it's forkserver */
+static void init_forkserver(char **argv) {
   static struct itimerval it;
+  int st_pipe[2], ctl_pipe[2];
   int status = 0;
+  s32 rlen;
 
-  s32 prog_in_fd;
-  u32 cksum;
+  ACTF("Spinning up the fork server...");
+  if (pipe(st_pipe) || pipe(ctl_pipe)) PFATAL("pipe() failed");
 
-  memset(trace_bits, 0, MAP_SIZE);
-  MEM_BARRIER();
+  forksrv_pid = fork();
 
-  prog_in_fd = write_to_file(prog_in, mem, len);
+  if (forksrv_pid < 0) PFATAL("fork() failed");
 
-  child_pid = fork();
-
-  if (child_pid < 0) PFATAL("fork() failed");
-
-  if (!child_pid) {
+  if (!forksrv_pid) {
 
     struct rlimit r;
 
@@ -304,6 +313,16 @@ static u8 run_target(char** argv, u8* mem, u32 len, u8 first_run) {
     r.rlim_max = r.rlim_cur = 0;
     setrlimit(RLIMIT_CORE, &r); /* Ignore errors */
 
+    /* Set up control and status pipes, close the unneeded original fds. */
+
+    if (dup2(ctl_pipe[0], FORKSRV_FD) < 0) PFATAL("dup2() failed");
+    if (dup2(st_pipe[1], FORKSRV_FD + 1) < 0) PFATAL("dup2() failed");
+
+    close(ctl_pipe[0]);
+    close(ctl_pipe[1]);
+    close(st_pipe[0]);
+    close(st_pipe[1]);
+
     execv(target_path, argv);
 
     *(u32*)trace_bits = EXEC_FAIL_SIG;
@@ -311,17 +330,113 @@ static u8 run_target(char** argv, u8* mem, u32 len, u8 first_run) {
 
   }
 
-  close(prog_in_fd);
+  /* Close the unneeded endpoints. */
+
+  close(ctl_pipe[0]);
+  close(st_pipe[1]);
+
+  fsrv_ctl_fd = ctl_pipe[1];
+  fsrv_st_fd  = st_pipe[0];
 
   /* Configure timeout, wait for child, cancel timeout. */
+
+  if (exec_tmout) {
+
+    child_timed_out = 0;
+    it.it_value.tv_sec = (exec_tmout * FORK_WAIT_MULT / 1000);
+    it.it_value.tv_usec = ((exec_tmout * FORK_WAIT_MULT) % 1000) * 1000;
+
+  }
+
+  setitimer(ITIMER_REAL, &it, NULL);
+
+  rlen = read(fsrv_st_fd, &status, 4);
+
+  it.it_value.tv_sec = 0;
+  it.it_value.tv_usec = 0;
+  setitimer(ITIMER_REAL, &it, NULL);
+
+  /* If we have a four-byte "hello" message from the server, we're all set.
+     Otherwise, try to figure out what went wrong. */
+
+  if (rlen == 4) {
+    ACTF("All right - fork server is up.");
+    return;
+  }
+
+  if (waitpid(forksrv_pid, &status, 0) <= 0)
+    PFATAL("waitpid() failed");
+
+  u8 child_crashed;
+
+  if (WIFSIGNALED(status))
+    child_crashed = 1;
+
+  if (child_timed_out)
+    SAYF(cLRD "\n+++ Program timed off +++\n" cRST);
+  else if (stop_soon)
+    SAYF(cLRD "\n+++ Program aborted by user +++\n" cRST);
+  else if (child_crashed)
+    SAYF(cLRD "\n+++ Program killed by signal %u +++\n" cRST, WTERMSIG(status));
+
+}
+
+
+/* Execute target application. Returns 0 if the changes are a dud, or
+   1 if they should be kept. */
+
+static u8 run_target(char** argv, u8* mem, u32 len, u8 first_run) {
+
+  static struct itimerval it;
+  static u32 prev_timed_out = 0;
+  int status = 0;
+
+  u32 cksum;
+
+  memset(trace_bits, 0, MAP_SIZE);
+  MEM_BARRIER();
+
+  write_to_testcase(mem, len);
+
+  s32 res;
+
+  /* we have the fork server up and running, so simply
+     tell it to have at it, and then read back PID. */
+
+  if ((res = write(fsrv_ctl_fd, &prev_timed_out, 4)) != 4) {
+
+    if (stop_soon) return 0;
+    RPFATAL(res, "Unable to request new process from fork server (OOM?)");
+
+  }
+
+  if ((res = read(fsrv_st_fd, &child_pid, 4)) != 4) {
+
+    if (stop_soon) return 0;
+    RPFATAL(res, "Unable to request new process from fork server (OOM?)");
+
+  }
+
+  if (child_pid <= 0) FATAL("Fork server is misbehaving (OOM?)");
+
+  /* Configure timeout, wait for child, cancel timeout. */
+
+  if (exec_tmout) {
 
   child_timed_out = 0;
   it.it_value.tv_sec = (exec_tmout / 1000);
   it.it_value.tv_usec = (exec_tmout % 1000) * 1000;
 
+  }
+
   setitimer(ITIMER_REAL, &it, NULL);
 
-  if (waitpid(child_pid, &status, 0) <= 0) FATAL("waitpid() failed");
+  if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
+
+    if (stop_soon) return 0;
+    RPFATAL(res, "Unable to communicate with fork server (OOM?)");
+
+  }
 
   child_pid = 0;
   it.it_value.tv_sec = 0;
@@ -687,6 +802,13 @@ static void set_up_environment(void) {
 
   }
 
+  unlink(prog_in);
+
+  prog_in_fd = open(prog_in, O_RDWR | O_CREAT | O_EXCL, 0600);
+
+  if (prog_in_fd < 0) PFATAL("Unable to create '%s'", prog_in);
+
+
   /* Set sane defaults... */
 
   x = getenv("ASAN_OPTIONS");
@@ -756,48 +878,6 @@ static void setup_signal_handlers(void) {
 
   sa.sa_handler = handle_timeout;
   sigaction(SIGALRM, &sa, NULL);
-
-}
-
-
-/* Detect @@ in args. */
-
-static void detect_file_args(char** argv) {
-
-  u32 i = 0;
-  u8* cwd = getcwd(NULL, 0);
-
-  if (!cwd) PFATAL("getcwd() failed");
-
-  while (argv[i]) {
-
-    u8* aa_loc = strstr(argv[i], "@@");
-
-    if (aa_loc) {
-
-      u8 *aa_subst, *n_arg;
-
-      /* Be sure that we're always using fully-qualified paths. */
-
-      if (prog_in[0] == '/') aa_subst = prog_in;
-      else aa_subst = alloc_printf("%s/%s", cwd, prog_in);
-
-      /* Construct a replacement argv value. */
-
-      *aa_loc = 0;
-      n_arg = alloc_printf("%s%s%s", argv[i], aa_subst, aa_loc + 2);
-      argv[i] = n_arg;
-      *aa_loc = '@';
-
-      if (prog_in[0] != '/') ck_free(aa_subst);
-
-    }
-
-    i++;
-
-  }
-
-  free(cwd); /* not tracked */
 
 }
 
@@ -896,10 +976,6 @@ static char** get_qemu_argv(u8* own_loc, char** argv, int argc) {
   char** new_argv = ck_alloc(sizeof(char*) * (argc + 4));
   u8 *tmp, *cp, *rsl, *own_copy;
 
-  /* Workaround for a QEMU stability glitch. */
-
-  setenv("QEMU_LOG", "nochain", 1);
-
   memcpy(new_argv + 3, argv + 1, sizeof(char*) * argc);
 
   /* Now we need to actually find qemu for argv[0]. */
@@ -965,6 +1041,8 @@ static void read_bitmap(u8* fname) {
 
 }
 
+
+
 /* Main entry point */
 
 int main(int argc, char** argv) {
@@ -975,7 +1053,7 @@ int main(int argc, char** argv) {
 
   doc_path = access(DOC_PATH, F_OK) ? "docs" : DOC_PATH;
 
-  SAYF(cCYA "afl-tmin " cBRI VERSION cRST " by <lcamtuf@google.com>\n");
+  SAYF(cCYA "afl-tmin" VERSION cRST " by <lcamtuf@google.com>\n");
 
   while ((opt = getopt(argc,argv,"+i:o:f:m:t:B:xeQU")) > 0)
 
@@ -1105,13 +1183,14 @@ int main(int argc, char** argv) {
 
   if (optind == argc || !in_file || !out_file) usage(argv[0]);
 
-  setup_shm();
+  setup_shm(0);
+  atexit(at_exit_handler);
   setup_signal_handlers();
 
   set_up_environment();
 
   find_binary(argv[optind]);
-  detect_file_args(argv + optind);
+  detect_file_args(argv + optind, prog_in);
 
   if (qemu_mode)
     use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);
@@ -1123,6 +1202,8 @@ int main(int argc, char** argv) {
   SAYF("\n");
 
   read_initial_file();
+
+  init_forkserver(use_argv);
 
   ACTF("Performing dry run (mem limit = %llu MB, timeout = %u ms%s)...",
        mem_limit, exec_tmout, edges_only ? ", edges only" : "");
