@@ -1,0 +1,57 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "debug unicorn",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/afl-fuzz",
+            "args": [
+                "-U",
+                "-m", "none",
+                "-t", "9999999",
+                "-i", "../samples/simple/in",
+                "-o", "../samples/simple/out",
+                "--",
+                "python",
+                "../samples/simple/simple_test_harness.py",
+                "../samples/simple/sample_inputs",
+                ],
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}/unicorn_mode/unicorn",
+            "environment": [
+                {
+                    "name": "LIBUNICORN_PATH",
+                    "value": "${workspaceFolder}/unicorn_mode/unicorn"
+                }
+                /*{
+                    "name": "PYTHONPATH",
+                    "value": "${workspaceFolder}/unicorn_mode/unicorn/bindings/python"
+                },
+                {
+                    "name": "VIRTUAL_ENV",
+                    "value": "${workspaceFolder}/unienv"
+                }*/
+            ],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Follow child on forks",
+                    "text": "-gdb-set follow-fork-mode child"
+                }
+            ],
+            //"preLaunchTask": "make unicorn debug",
+            "miDebuggerPath": "/bin/gdb"
+        }
+    ]
+}

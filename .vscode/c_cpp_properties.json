@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/unicorn_mode/unicorn/include",
+                "${workspaceFolder}/unicorn_mode/unicorn/qemu/include",
+                "${workspaceFolder}/unicorn_mode/unicorn/qemu/include/**"
+            ],
+            "defines": [
+                "UNICORN_HAS_X86",
+                "TARGET_I386",
+                "TARGET_X86_64",
+                "CONFIG_USER_ONLY",
+                "UNICORN_AFL"
+            ],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c11",
+            "cppStandard": "c++03",
+            "intelliSenseMode": "clang-x64"
+        }
+    ],
+    "version": 4
+}

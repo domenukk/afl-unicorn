@@ -1,0 +1,11 @@
+{
+    "python.pythonPath": "/usr/bin/python",
+    "files.associations": {
+        "afl-unicorn-translate-inl.h": "c",
+        "tcg-op.h": "c",
+        "cpu.h": "c",
+        "uc_priv.h": "c",
+        "int128.h": "c",
+        "afl-unicorn-cpu-inl.h": "c"
+    }
+}

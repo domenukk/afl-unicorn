@@ -1,0 +1,39 @@
+{
+    "tasks": [
+        {
+            "type": "shell",
+            "label": "make unicorn debug",
+            "command": "./make.sh",
+            "args": [
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/unicorn",
+                "env": {
+                    "UNICORN_QEMU_FLAGS": "--python=python2"
+                }
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "type": "shell",
+            "label": "clean",
+            "command": "make",
+            "args": [
+                "clean"
+            ],
+            "options": {
+                "cwd": "./unicorn",
+                "env": {
+                    "UNICORN_QEMU_FLAGS": "--python=python2"
+                }
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        }
+
+    ],
+    "version": "2.0.0"
+}
