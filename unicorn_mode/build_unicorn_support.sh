@@ -101,7 +101,11 @@ fi
 
 echo "[+] All checks passed!"
 
-echo "TODO: Download git"
+
+echo "[*] Updating submodule"
+git submodule init || exit 1
+git submodule update || exit 1
+echo "[+] Submodule updated"
 
 echo "[*] Configuring Unicorn build..."
 
