@@ -13,7 +13,7 @@ afl-showmap
 afl-tmin
 as
 .curr_input
-.fuze*
+.fuse*
 plot_data
 id:*
 in
