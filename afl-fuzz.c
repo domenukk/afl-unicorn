@@ -12169,6 +12169,8 @@ int main(int argc, char** argv) {
 
         if (!mem_limit_given) mem_limit = MEM_LIMIT_UNICORN;
 
+        break;
+
       case 'V': {
            most_time_key = 1;
            if (sscanf(optarg, "%llu", &most_time) < 1 || optarg[0] == '-')
