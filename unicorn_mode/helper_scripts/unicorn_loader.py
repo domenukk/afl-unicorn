@@ -24,6 +24,7 @@ from unicorn import *
 from unicorn.arm_const import *
 from unicorn.arm64_const import *
 from unicorn.x86_const import *
+from unicorn.mips_const import *
 
 # Name of the index file
 INDEX_FILE_NAME = "_index.json"
@@ -190,8 +191,23 @@ class AflUnicornEngine(Uc):
                 if debug_print:
                     print("Skipping Reg: {}".format(register))
             else:
-                self.reg_write(reg_map[register.lower()], value)
+                reg_write_retry = True
+                try:
+                    self.reg_write(reg_map[register.lower()], value)
+                    reg_write_retry = False
+                except Exception as e:
+                    if debug_print:
+                        print("ERROR writing register: {}, value: {} -- {}".format(register, value, repr(e)))
 
+                if reg_write_retry:
+                    if debug_print:
+                        print("Trying to parse value ({}) as hex string".format(value))
+                    try:
+                        self.reg_write(reg_map[register.lower()], int(value, 16))
+                    except Exception as e:
+                        if debug_print:
+                            print("ERROR writing hex string register: {}, value: {} -- {}".format(register, value, repr(e)))
+                        
         # Setup the memory map and load memory content
         self.__map_segments(context['segments'], context_directory, debug_print)
         
@@ -350,6 +366,8 @@ class AflUnicornEngine(Uc):
             "armle"     : [ UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_ARM | UC_MODE_LITTLE_ENDIAN ],
             "armbethumb": [ UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_THUMB | UC_MODE_BIG_ENDIAN ],
             "armlethumb": [ UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_THUMB | UC_MODE_LITTLE_ENDIAN ],
+            "mips"      : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32 | UC_MODE_BIG_ENDIAN ],
+            "mipsel"    : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN ],
         }
         return (arch_map[arch_str][1], arch_map[arch_str][2])
 
@@ -358,6 +376,8 @@ class AflUnicornEngine(Uc):
             arch = "arm64"
         elif arch == "armle" or arch == "armbe" or "thumb" in arch:
             arch = "arm"
+        elif arch == "mipsel":
+            arch = "mips"
 
         registers = {
             "x64" : {
@@ -457,6 +477,44 @@ class AflUnicornEngine(Uc):
                 "lr":     UC_ARM64_REG_LR,
                 "nzcv":   UC_ARM64_REG_NZCV,
                 "cpsr": UC_ARM_REG_CPSR, 
+            },
+            "mips" : {
+                "0" :     UC_MIPS_REG_ZERO,
+                "at":     UC_MIPS_REG_AT,
+                "v0":     UC_MIPS_REG_V0,
+                "v1":     UC_MIPS_REG_V1,
+                "a0":     UC_MIPS_REG_A0,
+                "a1":     UC_MIPS_REG_A1,
+                "a2":     UC_MIPS_REG_A2,
+                "a3":     UC_MIPS_REG_A3,
+                "t0":     UC_MIPS_REG_T0,
+                "t1":     UC_MIPS_REG_T1,
+                "t2":     UC_MIPS_REG_T2,
+                "t3":     UC_MIPS_REG_T3,
+                "t4":     UC_MIPS_REG_T4,
+                "t5":     UC_MIPS_REG_T5,
+                "t6":     UC_MIPS_REG_T6,
+                "t7":     UC_MIPS_REG_T7,
+                "t8":     UC_MIPS_REG_T8,
+                "t9":     UC_MIPS_REG_T9,
+                "s0":     UC_MIPS_REG_S0,
+                "s1":     UC_MIPS_REG_S1,
+                "s2":     UC_MIPS_REG_S2,    
+                "s3":     UC_MIPS_REG_S3,
+                "s4":     UC_MIPS_REG_S4,
+                "s5":     UC_MIPS_REG_S5,
+                "s6":     UC_MIPS_REG_S6,              
+                "s7":     UC_MIPS_REG_S7,
+                "s8":     UC_MIPS_REG_S8,  
+                "k0":     UC_MIPS_REG_K0,
+                "k1":     UC_MIPS_REG_K1,
+                "gp":     UC_MIPS_REG_GP,
+                "pc":     UC_MIPS_REG_PC,
+                "sp":     UC_MIPS_REG_SP,
+                "fp":     UC_MIPS_REG_FP,
+                "ra":     UC_MIPS_REG_RA,
+                "hi":     UC_MIPS_REG_HI,
+                "lo":     UC_MIPS_REG_LO
             }
         }
         return registers[arch]   
