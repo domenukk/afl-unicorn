@@ -11140,7 +11140,7 @@ EXP_ST void check_binary(u8* fname) {
 
 #endif /* ^!__APPLE__ */
 
-  if (!qemu_mode && !dumb_mode &&
+  if (!qemu_mode && !unicorn_mode && !dumb_mode &&
       !memmem(f_data, f_len, SHM_ENV_VAR, strlen(SHM_ENV_VAR) + 1)) {
 
     SAYF("\n" cLRD "[-] " cRST
