@@ -48,6 +48,53 @@
                 {
                     "description": "Follow child on forks",
                     "text": "-gdb-set follow-fork-mode child"
+                },
+                /*{
+                    "description": "Never stop following anybody / both will stop.",
+                    "text": "-gdb-set detach-on-fork off"
+                }*/
+            ],
+            //"preLaunchTask": "make unicorn debug",
+            "miDebuggerPath": "/bin/gdb"
+        },
+        {
+            "name": "debug unicorn in ipython",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/bin/python",
+            "args": [
+                ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/unicorn_mode/unicorn",
+            "environment": [
+                {
+                    "name": "LIBUNICORN_PATH",
+                    "value": "${workspaceFolder}/unicorn_mode/unicorn"
+                }
+                /*{
+                    "name": "PYTHONPATH",
+                    "value": "${workspaceFolder}/unicorn_mode/unicorn/bindings/python"
+                },
+                {
+                    "name": "VIRTUAL_ENV",
+                    "value": "${workspaceFolder}/unienv"
+                }*/
+            ],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Follow child on forks",
+                    "text": "-gdb-set follow-fork-mode child"
+                },
+                {
+                    "description": "Never stop following anybody / both will stop.",
+                    "text": "-gdb-set detach-on-fork off"
                 }
             ],
             //"preLaunchTask": "make unicorn debug",
